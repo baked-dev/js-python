@@ -3,14 +3,15 @@ import { randomBytes } from "crypto";
 
 class JSPython {
 
-    static instances: {
+    private static instances: {
         [scriptPath: string]: JSPython;
     } = {};
 
-    static Instance (scriptPath: string, maxThreads: number = 2) {
+    public static Instance (scriptPath: string, maxThreads: number = 2) {
         return this.instances[scriptPath] || (this.instances[scriptPath] = new this(scriptPath, maxThreads));
     }
 
+    private log: boolean = true;
     private process: ChildProcessWithoutNullStreams;
     private queue: {
         args: string[],
@@ -49,13 +50,15 @@ class JSPython {
             stdio: ['pipe', 'pipe', 'pipe']
         });
         this.process.stdout.on('data', this.processMessage);
+        this.process.on('exit', this.handleCrash);
     }
 
-    private processMessage = (message: Serializable, handle: SendHandle) => {
+    private processMessage = (message: Serializable) => {
         const stringMessage = message.toString().trim();
         const [id, type, ...data] = stringMessage.split('|');
         if (type === 'ready') {
             this.ready = true;
+            if (this.log) console.log(`[${this.scriptPath}] Ready`);
             for (
                 let i = 0; 
                 i < (this.maxThreads < this.queue.length ? this.maxThreads : this.queue.length); 
@@ -78,15 +81,22 @@ class JSPython {
         }
     }
 
+    private handleCrash = () => {
+        this.ready = false;
+        this.startPython();
+    }
+
     private doRunTask = async (...args: string[]) => {
         this.threadCount++;
         const id = randomBytes(16).toString('hex');
         await this.writeToStream([id, ...args].join('|') + '\n');
+        if (this.log) console.log(`[${id}][${this.scriptPath}] Started task with args: ${args.join()}`);
         const result = await new Promise<string[]>((resolve) => {
             this.resolveMap[id] = resolve;
         });
         this.threadCount--
         delete this.resolveMap[id];
+        if (this.log) console.log(`[${id}][${this.scriptPath}] Task finshied with result: ${result.join()}`);
         return result;
     }
 
@@ -117,5 +127,3 @@ const tasks = [
     connection.runTask('some more data', 'some more more data'),
     connection.runTask('other data', 'some more other data')
 ];
-
-Promise.all(tasks).then(console.log);
