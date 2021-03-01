@@ -1,20 +1,31 @@
-import { ChildProcessWithoutNullStreams, SendHandle, Serializable, spawn } from "child_process";
+import { ChildProcessWithoutNullStreams, Serializable, spawn } from "child_process";
 import { randomBytes } from "crypto";
 
-class JSPython {
+enum ProcessMessageType {
+    READY = '0',
+    RESULT = '1'
+}
+
+type ProcessMessage = [
+    string,
+    ProcessMessageType,
+    ...string[]
+]
+
+class JSPython<T = {}> {
 
     private static instances: {
-        [scriptPath: string]: JSPython;
+        [scriptPath: string]: JSPython<any>;
     } = {};
 
-    public static Instance (scriptPath: string, maxThreads: number = 2) {
-        return this.instances[scriptPath] || (this.instances[scriptPath] = new this(scriptPath, maxThreads));
+    public static Instance<T>(scriptPath: string, maxThreads: number = 2): JSPython<T> {
+        return this.instances[scriptPath] || (this.instances[scriptPath] = new this<T>(scriptPath, maxThreads));
     }
 
     private log: boolean = true;
     private process: ChildProcessWithoutNullStreams;
     private queue: {
-        args: string[],
+        task: T,
         resolver: (result: string[]) => void;
     }[] = [];
     private ready: boolean = false;
@@ -27,19 +38,19 @@ class JSPython {
         this.startPython();
     }
 
-    public runTask = async (...args: string[]) => {
+    public runTask = async (task: T) => {
         if (this.threadCount >= this.maxThreads || !this.ready){
             return await new Promise((resolve) => {
                 this.queue.push({
-                    args,
+                    task,
                     resolver: resolve
                 });
             });
         } else {
-            const result = await this.doRunTask(...args);
+            const result = await this.doRunTask(task);
             if (this.queue.length > 0) {
                 const nextItem = this.queue.shift();
-                this.runTask(...nextItem.args).then(nextItem.resolver);
+                this.runTask(nextItem.task).then(nextItem.resolver);
             }
             return result;
         }
@@ -55,8 +66,8 @@ class JSPython {
 
     private processMessage = (message: Serializable) => {
         const stringMessage = message.toString().trim();
-        const [id, type, ...data] = stringMessage.split('|');
-        if (type === 'ready') {
+        const [id, type, ...data] = stringMessage.split('|') as ProcessMessage;
+        if (type === ProcessMessageType.READY) {
             this.ready = true;
             if (this.log) console.log(`[${this.scriptPath}] Ready`);
             for (
@@ -65,11 +76,11 @@ class JSPython {
                 i++
             ) {
                 const nextItem = this.queue.shift();
-                this.runTask(...nextItem.args).then(nextItem.resolver);
+                this.runTask(nextItem.task).then(nextItem.resolver);
             }
             return
 
-        } else if (type === 'response') {
+        } else if (type === ProcessMessageType.RESULT) {
             const resolver = this.resolveMap[id];
             resolver([...data]);
             return;
@@ -86,11 +97,11 @@ class JSPython {
         this.startPython();
     }
 
-    private doRunTask = async (...args: string[]) => {
+    private doRunTask = async (task: T) => {
         this.threadCount++;
         const id = randomBytes(16).toString('hex');
-        await this.writeToStream([id, ...args].join('|') + '\n');
-        if (this.log) console.log(`[${id}][${this.scriptPath}] Started task with args: ${args.join()}`);
+        await this.writeToStream([id, JSON.stringify(task)].join('|') + '\n');
+        if (this.log) console.log(`[${id}][${this.scriptPath}] Started task with args: ${JSON.stringify(task)}`);
         const result = await new Promise<string[]>((resolve) => {
             this.resolveMap[id] = resolve;
         });
@@ -121,9 +132,25 @@ class JSPython {
 
 }
 
-const connection = JSPython.Instance('./py-test.py');
-const tasks = [
-    connection.runTask('some data', 'more data'),
-    connection.runTask('some more data', 'some more more data'),
-    connection.runTask('other data', 'some more other data')
-];
+const connection = JSPython.Instance<{
+    command: string,
+    args: any[]
+}>('./py-test.py');
+
+connection.runTask({
+    command: 'test',
+    args: ['hello', 1]
+});
+connection.runTask({
+    command: 'random',
+    args: [12]
+});
+
+connection.runTask({
+    command: 'test',
+    args: ['hello back', 4]
+});
+connection.runTask({
+    command: 'random',
+    args: [4]
+});
