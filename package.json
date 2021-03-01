@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node ./dist/js-python.js"
   },
-  "author": "",
+  "author": "baked-dev",
   "license": "ISC",
   "dependencies": {
     "@types/node": "^14.14.31",
