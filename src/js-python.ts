@@ -12,25 +12,25 @@ type ProcessMessage = [
     ...string[]
 ]
 
-class JSPython<T = {}> {
+class JSPython<T extends JSONStringifyable = {}, R extends JSONStringifyable = {}> {
 
     private static instances: {
-        [scriptPath: string]: JSPython<any>;
+        [scriptPath: string]: JSPython<any, any>;
     } = {};
 
-    public static Instance<T>(scriptPath: string, maxThreads: number = 2): JSPython<T> {
-        return this.instances[scriptPath] || (this.instances[scriptPath] = new this<T>(scriptPath, maxThreads));
+    public static Instance<T extends JSONStringifyable, R extends JSONStringifyable>(scriptPath: string, maxThreads: number = 2): JSPython<T, R> {
+        return this.instances[scriptPath] || (this.instances[scriptPath] = new this<T, R>(scriptPath, maxThreads));
     }
 
     private log: boolean = true;
     private process: ChildProcessWithoutNullStreams;
     private queue: {
         task: T,
-        resolver: (result: string[]) => void;
+        resolver: (result: R) => void;
     }[] = [];
     private ready: boolean = false;
     private resolveMap: {
-        [key: string]: (result: string[]) => void;
+        [key: string]: (result: R) => void;
     } = {};
     private threadCount = 0;
 
@@ -40,7 +40,7 @@ class JSPython<T = {}> {
 
     public runTask = async (task: T) => {
         if (this.threadCount >= this.maxThreads || !this.ready){
-            return await new Promise((resolve) => {
+            return await new Promise<R>((resolve) => {
                 this.queue.push({
                     task,
                     resolver: resolve
@@ -66,7 +66,7 @@ class JSPython<T = {}> {
 
     private processMessage = (message: Serializable) => {
         const stringMessage = message.toString().trim();
-        const [id, type, ...data] = stringMessage.split('|') as ProcessMessage;
+        const [id, type, data] = stringMessage.split('|') as ProcessMessage;
         if (type === ProcessMessageType.READY) {
             this.ready = true;
             if (this.log) console.log(`[${this.scriptPath}] Ready`);
@@ -82,7 +82,7 @@ class JSPython<T = {}> {
 
         } else if (type === ProcessMessageType.RESULT) {
             const resolver = this.resolveMap[id];
-            resolver([...data]);
+            resolver(JSON.parse(data));
             return;
 
         } else {
@@ -92,9 +92,11 @@ class JSPython<T = {}> {
         }
     }
 
-    private handleCrash = () => {
-        this.ready = false;
-        this.startPython();
+    private handleCrash = (code: number) => {
+        if (code !== 1) {
+            this.ready = false;
+            this.startPython();
+        }
     }
 
     private doRunTask = async (task: T) => {
@@ -102,12 +104,12 @@ class JSPython<T = {}> {
         const id = randomBytes(16).toString('hex');
         await this.writeToStream([id, JSON.stringify(task)].join('|') + '\n');
         if (this.log) console.log(`[${id}][${this.scriptPath}] Started task with args: ${JSON.stringify(task)}`);
-        const result = await new Promise<string[]>((resolve) => {
+        const result = await new Promise<R>((resolve) => {
             this.resolveMap[id] = resolve;
         });
         this.threadCount--
         delete this.resolveMap[id];
-        if (this.log) console.log(`[${id}][${this.scriptPath}] Task finshied with result: ${result.join()}`);
+        if (this.log) console.log(`[${id}][${this.scriptPath}] Task finshied with result: ${JSON.stringify(result)}`);
         return result;
     }
 
@@ -132,25 +134,40 @@ class JSPython<T = {}> {
 
 }
 
-const connection = JSPython.Instance<{
+type ExampleMessage = {
     command: string,
-    args: any[]
-}>('./py-test.py');
+    args: JSONStringifyable[]
+}
 
-connection.runTask({
+type ExampleResult = {
+    result: string;
+}
+
+type TKeyType = string | number;
+
+type JSONStringifyable = {
+    [key in TKeyType]: JSONStringifyable
+} | string | number | boolean | null | undefined | JSONStringifyable[]
+
+const example = JSPython.Instance<ExampleMessage, ExampleResult>('./py-example.py');
+
+// this is now typed through the generic type
+example.runTask({
     command: 'test',
     args: ['hello', 1]
 });
-connection.runTask({
+example.runTask({
     command: 'random',
     args: [12]
 });
-
-connection.runTask({
+example.runTask({
     command: 'test',
-    args: ['hello back', 4]
+    args: ['hello back', 2]
 });
-connection.runTask({
+example.runTask({
     command: 'random',
     args: [4]
+}).then((res) => {
+    // this is now typed too
+    console.log(res.result);
 });
