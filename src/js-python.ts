@@ -12,6 +12,12 @@ type ProcessMessage = [
     ...string[]
 ]
 
+type TKeyType = string | number;
+
+type JSONStringifyable = {
+    [key in TKeyType]: JSONStringifyable
+} | string | number | boolean | null | undefined | JSONStringifyable[]
+
 class JSPython<T extends JSONStringifyable = {}, R extends JSONStringifyable = {}> {
 
     private static instances: {
@@ -142,12 +148,6 @@ type ExampleMessage = {
 type ExampleResult = {
     result: string;
 }
-
-type TKeyType = string | number;
-
-type JSONStringifyable = {
-    [key in TKeyType]: JSONStringifyable
-} | string | number | boolean | null | undefined | JSONStringifyable[]
 
 const example = JSPython.Instance<ExampleMessage, ExampleResult>('./py-example.py');
 
