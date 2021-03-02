@@ -16,9 +16,9 @@ type TKeyType = string | number;
 
 type JSONStringifyable = {
     [key in TKeyType]: JSONStringifyable
-} | string | number | boolean | null | undefined | JSONStringifyable[]
+} | string | number | boolean | null | JSONStringifyable[]
 
-class JSPython<T extends JSONStringifyable = {}, R extends JSONStringifyable = {}> {
+class JSPython<T extends JSONStringifyable, R extends JSONStringifyable> {
 
     private static instances: {
         [scriptPath: string]: JSPython<any, any>;
